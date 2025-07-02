@@ -1,20 +1,18 @@
-
 <!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>3D 캐릭터 HUD, 달력 & 말풍선 채팅</title>
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; font-family: Arial, sans-serif; overflow: hidden; }
+
+    /* 오른쪽 HUD */
     #right-hud {
       position: fixed; top: 10%; right: 1%; width: 20%; padding: 1%;
       background: rgba(255,255,255,0.8); border-radius: 5px;
       box-shadow: 0 4px 8px rgba(0,0,0,0.2); z-index: 20;
-      display: flex; flex-direction: column;
     }
     #chat-log {
       display: none; height: 100px; overflow-y: scroll;
@@ -27,17 +25,19 @@
     #chat-input {
       flex: 1; padding: 5px; font-size: 14px;
     }
-    /* 새로 추가된 HUD3 */
+    /* HUD3: Google 지도 iframe */
     #hud3 {
-      margin-top: 10px; background: rgba(240,240,240,0.8);
-      border: 1px solid #ccc; border-radius: 4px; padding: 5px;
+      margin-top: 10px; border: 1px solid #ccc; border-radius: 4px;
+      overflow: hidden;
     }
     #hud3 h4 {
-      font-size: 12px; margin-bottom: 5px;
+      font-size: 12px; background: #f0f0f0; padding: 4px; margin: 0;
     }
-    #hud3 #map {
-      width: 100%; height: 150px; border-radius: 3px;
+    #hud3 iframe {
+      width: 100%; height: 150px; border: 0;
     }
+
+    /* 왼쪽 HUD (캘린더) */
     #left-hud {
       position: fixed; top: 10%; left: 1%; width: 20%; padding: 1%;
       background: rgba(255,255,255,0.9); border-radius: 5px;
@@ -64,7 +64,7 @@
       margin: 2px; padding: 5px 8px; font-size: 12px; cursor: pointer;
     }
     #calendar-grid {
-      display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+      display: grid; grid-template-columns: repeat(7,1fr); gap: 2px;
     }
     #calendar-grid div {
       background: #fff; border: 1px solid #ccc; border-radius: 4px;
@@ -80,16 +80,21 @@
       margin-top: 14px; font-size: 8px; color: #333;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+
+    /* Three.js 캔버스 */
     #canvas {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       z-index: 1; display: block;
     }
+    /* 말풍선 */
     #speech-bubble {
       position: fixed; background: white; padding: 5px 10px;
       border-radius: 10px; font-size: 12px; display: none;
       z-index: 30; white-space: pre-line; pointer-events: none;
       box-shadow: 0 2px 5px rgba(0,0,0,0.2);
     }
+
+    /* 튜토리얼 오버레이 */
     #tutorial-overlay {
       position: fixed; top: 0; left: 0; width: 100%; height: 100%;
       background: rgba(0,0,0,0.7); color: white; display: flex;
@@ -97,18 +102,20 @@
       opacity: 0; transition: opacity 1s ease-in-out; pointer-events: none;
     }
     #tutorial-content {
-      text-align: center; padding: 20px;
-      background: rgba(255,255,255,0.1); border-radius: 10px;
-      max-width: 600px;
+      text-align: center; padding: 20px; background: rgba(255,255,255,0.1);
+      border-radius: 10px; max-width: 600px;
     }
     #tutorial-content h2 { margin-bottom: 15px; }
     #tutorial-content p { margin: 10px 0; font-size: 14px; }
+
+    /* 버전 셀렉터 */
     #version-select {
       position: fixed; bottom: 10px; left: 10px; z-index: 50;
     }
     #version-select select {
       padding: 5px; font-size: 12px;
     }
+
     @media (max-width: 480px) {
       #right-hud, #left-hud {
         width: 90%; left: 5%; right: 5%; top: 5%;
@@ -118,11 +125,8 @@
 
   <!-- Three.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
-  <!-- Leaflet JS -->
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
   <script>
-    // ** 전역 변수 및 설정 **
     document.addEventListener("contextmenu", e => e.preventDefault());
     let blockUntil = 0;
     document.addEventListener("copy", e => {
@@ -137,424 +141,127 @@
     const weatherKey = "396bfaf4974ab9c336b3fb46e15242da";
     let currentWeather = "";
 
-    // ** 파일 저장 **
     function saveFile() {
-      const blob = new Blob(["파일 저장 완료"], {type:"text/plain;charset=utf-8"});
+      const b = new Blob(["파일 저장 완료"], {type:"text/plain"});
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "saved_file.txt";
+      a.href = URL.createObjectURL(b);
+      a.download="saved_file.txt";
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
-
-    // ** 캘린더 저장 **
     function saveCalendar() {
       const days = new Date(currentYear, currentMonth+1, 0).getDate();
       let data = {};
       for(let d=1;d<=days;d++){
         const ev = document.getElementById(`event-${currentYear}-${currentMonth+1}-${d}`);
-        if(ev&&ev.textContent.trim()) data[`${currentYear}-${currentMonth+1}-${d}`] = ev.textContent;
+        if(ev && ev.textContent) data[`${currentYear}-${currentMonth+1}-${d}`] = ev.textContent;
       }
-      const str = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data,null,2));
-      const a = document.createElement("a");
-      a.href = str; a.download="calendar_events.json";
+      const str = "data:text/json," + encodeURIComponent(JSON.stringify(data,null,2));
+      const a=document.createElement("a");
+      a.href=str; a.download="calendar_events.json";
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
 
-    // ** 채팅 전송 로직 **
     async function sendChat(){
-      const inputEl = document.getElementById("chat-input");
-      const txt = inputEl.value.trim();
+      const inp=document.getElementById("chat-input");
+      const txt=inp.value.trim();
       if(!txt) return;
       if(Date.now()<blockUntil){
         showSpeechBubbleInChunks("1시간동안 차단됩니다.");
-        inputEl.value=""; return;
+        inp.value="";return;
       }
-      let resp = "";
-      const lower = txt.toLowerCase();
-      if(lower.includes("파일 저장해줘")){
-        resp="네, 알겠습니다. 파일 저장하겠습니다."; saveFile();
+      let resp="";
+      const low=txt.toLowerCase();
+      if(low.includes("파일 저장해줘")){ resp="파일 저장합니다."; saveFile(); }
+      else if((low.includes("캘린더")&&low.includes("저장"))||low.includes("일정저장")||low.includes("하루일과저장")){
+        resp="캘린더 저장합니다."; saveCalendar();
       }
-      else if((lower.includes("캘린더")&&lower.includes("저장"))||
-              lower.includes("일정저장")||lower.includes("하루일과저장")){
-        resp="네, 알겠습니다. 캘린더 저장하겠습니다."; saveCalendar();
+      else if(low.includes("날씨")&&(low.includes("알려")||low.includes("어때")||low.includes("맑아"))){
+        resp=await getWeather();
       }
-      else if(lower.includes("날씨") && 
-              (lower.includes("알려")||lower.includes("어때")||
-               lower.includes("뭐야")||lower.includes("어떻게")||
-               lower.includes("맑아"))){
-        resp = await getWeather();
-      }
-      else if(lower.includes("기분")&&lower.includes("좋아")){
-        resp="정말요!? 저도 정말 기분좋아요😁";
-        const orig = leftEye.material.color.getHex();
-        leftEye.material.color.set(0xffff00);
-        rightEye.material.color.set(0xffff00);
-        setTimeout(()=>{ 
-          leftEye.material.color.set(orig);
-          rightEye.material.color.set(orig);
-        },500);
-        const ol = leftBrow.rotation.x, orr = rightBrow.rotation.x;
-        const iv = setInterval(()=>{
-          const a = Math.sin(Date.now()*0.005)*0.3;
-          leftBrow.rotation.x = ol + a;
-          rightBrow.rotation.x = orr + a;
-        },50);
-        setTimeout(()=>{ clearInterval(iv); leftBrow.rotation.x=ol; rightBrow.rotation.x=orr;},3000);
-      }
-      else if(lower.includes("안녕")){
-        resp="안녕하세요, 주인님! 오늘 기분은 어떠세요?";
-        characterGroup.children[7].rotation.z=Math.PI/4;
-        setTimeout(()=>{ characterGroup.children[7].rotation.z=0; },1000);
-      }
-      else if(lower.includes("캐릭터 넌 누구야")){
-        resp="저는 당신의 개인 비서에요.";
-      }
-      else if(lower.includes("일정")){
-        resp="캘린더는 왼쪽에서 확인하세요.";
-      }
-      else if(lower.includes("캐릭터 춤춰줘")){
-        resp="춤출게요!";
-        if(danceInterval) clearInterval(danceInterval);
-        danceInterval = setInterval(()=>{
-          characterGroup.children[7].rotation.z = Math.sin(Date.now()*0.01)*Math.PI/4;
-          head.rotation.y = Math.sin(Date.now()*0.01)*Math.PI/8;
-        },50);
-        setTimeout(()=>{
-          clearInterval(danceInterval);
-          characterGroup.children[7].rotation.z=0; head.rotation.y=0;
-        },3000);
-      }
-      else if(lower.includes("하루일정 삭제해줘")||lower.includes("일정 삭제")){
-        const d = prompt("삭제할 날짜(일) 입력:"); 
-        if(d){
-          const n=parseInt(d);
-          const ev=document.getElementById(`event-${currentYear}-${currentMonth+1}-${n}`);
-          if(ev){ ev.textContent=""; resp=`${currentYear}-${currentMonth+1}-${n} 일정이 삭제되었습니다.`; }
-          else resp="해당 날짜 셀이 없습니다.";
-        } else resp="날짜를 입력하지 않았습니다.";
-      }
-      else if(lower.includes("입력하게 보여줘")||lower.includes("일정 입력")){
-        const d=prompt("일정 입력할 날짜(일) 입력:");
-        if(d){
-          const n=parseInt(d);
-          const ev=document.getElementById(`event-${currentYear}-${currentMonth+1}-${n}`);
-          if(ev){
-            const t2=prompt(`${currentYear}-${currentMonth+1}-${n} 일정:`);
-            if(t2){ ev.textContent += ev.textContent?"; "+t2:t2; resp=`${currentYear}-${currentMonth+1}-${n}에 일정이 추가되었습니다.`; }
-            else resp="일정 입력되지 않았습니다.";
-          } else resp="해당 날짜 셀이 없습니다.";
-        } else resp="날짜를 입력하지 않았습니다.";
-      }
-      else {
-        resp="죄송해요, 잘 이해하지 못했어요. 다시 한 번 말씀해주시겠어요?";
-      }
+      else if(low.includes("안녕")){ resp="안녕하세요!"; }
+      else{ resp="죄송해요, 잘 이해하지 못했어요."; }
       showSpeechBubbleInChunks(resp);
-      inputEl.value="";
+      inp.value="";
     }
 
-    // ** 날씨 조회 **
     async function getWeather(){
       try{
         const city="Seoul";
         const url=`https://api.openweathermap.org/data/2.5/weather?q=${city}&appid=${weatherKey}&units=metric&lang=kr`;
-        const res=await fetch(url);
-        if(!res.ok) throw "";
-        const d=await res.json();
-        currentWeather=d.weather[0].description;
-        return `오늘 ${city}의 날씨는 ${currentWeather}이며, 온도는 ${d.main.temp}°C입니다.`;
+        const r=await fetch(url); if(!r.ok) throw "";
+        const d=await r.json();
+        return `오늘 ${city}의 날씨: ${d.weather[0].description}, ${d.main.temp}°C`;
       }catch{
-        currentWeather="";
         return "날씨 정보를 가져오지 못했습니다.";
       }
     }
 
-    function updateWeatherEffects(){
-      rainGroup.visible = /비|소나기/.test(currentWeather);
-      houseCloudGroup.visible = /구름/.test(currentWeather);
-    }
-    function updateLightning(){
-      if(/번개|뇌우/.test(currentWeather) && Math.random()<0.001){
-        lightningLight.intensity=5;
-        setTimeout(()=>{ lightningLight.intensity=0; },100);
-      }
-    }
-
-    // ** 말풍선 띄우기 **
-    function showSpeechBubbleInChunks(text, chunkSize=15, delay=3000){
-      const b=document.getElementById("speech-bubble");
-      const arr=[];
-      for(let i=0;i<text.length;i+=chunkSize) arr.push(text.slice(i,i+chunkSize));
+    function showSpeechBubbleInChunks(text, n=15, delay=3000){
+      const b=document.getElementById("speech-bubble"), arr=[];
+      for(let i=0;i<text.length;i+=n) arr.push(text.slice(i,i+n));
       let idx=0;
       (function next(){
         if(idx<arr.length){
-          b.textContent=arr[idx++];
-          b.style.display="block";
+          b.textContent=arr[idx++]; b.style.display="block";
           setTimeout(next,delay);
-        } else setTimeout(()=>{ b.style.display="none"; },3000);
+        } else setTimeout(()=>b.style.display="none",3000);
       })();
     }
 
-    // ** 지도 초기화 **
-    function initMap(){
-      const map = L.map('map').setView([37.5665,126.9780],13);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-        attribution:'&copy; OpenStreetMap contributors'
-      }).addTo(map);
-    }
+    window.addEventListener("DOMContentLoaded",()=>{
+      document.getElementById("chat-input")
+        .addEventListener("keydown",e=>{ if(e.key==="Enter") sendChat(); });
+    });
+    window.addEventListener("resize",()=>{
+      camera.aspect=window.innerWidth/window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth,window.innerHeight);
+    });
 
-    // ** Three.js 씬 & 애니메이션 **
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
-    const renderer = new THREE.WebGLRenderer({canvas:document.getElementById("canvas"),alpha:true});
+    // Three.js scene
+    const scene=new THREE.Scene();
+    const camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
+    const renderer=new THREE.WebGLRenderer({canvas:document.getElementById("canvas"),alpha:true});
     renderer.setSize(window.innerWidth,window.innerHeight);
     camera.position.set(5,5,10); camera.lookAt(0,0,0);
-    const directionalLight = new THREE.DirectionalLight(0xffffff,1);
-    directionalLight.position.set(5,10,7).normalize();
-    scene.add(directionalLight);
+    scene.add(new THREE.DirectionalLight(0xffffff,1));
     scene.add(new THREE.AmbientLight(0x333333));
-    const sunMaterial = new THREE.MeshStandardMaterial({color:0xffcc00,emissive:0xff9900,transparent:true,opacity:0});
-    const sun = new THREE.Mesh(new THREE.SphereGeometry(1.5,64,64),sunMaterial);
-    scene.add(sun);
-    const moonMaterial = new THREE.MeshStandardMaterial({color:0xcccccc,emissive:0x222222,transparent:true,opacity:1});
-    const moon = new THREE.Mesh(new THREE.SphereGeometry(1.2,64,64),moonMaterial);
-    scene.add(moon);
-    const stars=[],fireflies=[];
-    for(let i=0;i<200;i++){
-      const star=new THREE.Mesh(new THREE.SphereGeometry(0.03,8,8),
-        new THREE.MeshBasicMaterial({color:0xffffff}));
-      star.position.set((Math.random()-0.5)*100,(Math.random()-0.5)*60,-20);
-      scene.add(star); stars.push(star);
-    }
-    for(let i=0;i<60;i++){
-      const fly=new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8),
-        new THREE.MeshBasicMaterial({color:0xffff99}));
-      fly.position.set((Math.random()-0.5)*40,(Math.random()-0.5)*20,-10);
-      scene.add(fly); fireflies.push(fly);
-    }
-    const floor=new THREE.Mesh(
-      new THREE.PlaneGeometry(400,400,128,128),
-      new THREE.MeshStandardMaterial({color:0x808080,roughness:1,metalness:0})
-    );
-    floor.rotation.x=-Math.PI/2; floor.position.y=-2; scene.add(floor);
-    const backgroundGroup=new THREE.Group(); scene.add(backgroundGroup);
-    function createBuilding(w,h,d,c){
-      const g=new THREE.Group();
-      const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
-        new THREE.MeshStandardMaterial({color:c,roughness:0.7,metalness:0.1}));
-      g.add(b);
-      const wm=new THREE.MeshStandardMaterial({color:0x87CEEB});
-      for(let y=3;y<h-1;y+=2) for(let x=-w/2+0.5;x<w/2;x+=1){
-        const win=new THREE.Mesh(new THREE.BoxGeometry(0.4,0.8,0.1),wm);
-        win.position.set(x,y-h/2,d/2+0.01);
-        g.add(win);
-      }
-      const dm=new THREE.MeshStandardMaterial({color:0x8B4513});
-      const door=new THREE.Mesh(new THREE.BoxGeometry(1,2,0.1),dm);
-      door.position.set(0,-h/2+1,d/2+0.01); g.add(door);
-      return g;
-    }
-    function createHouse(w,h,d,bc,rc){
-      const g=new THREE.Group();
-      const base=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),
-        new THREE.MeshStandardMaterial({color:bc,roughness:0.8}));
-      base.position.y=-2+h/2; g.add(base);
-      const roof=new THREE.Mesh(new THREE.ConeGeometry(w*0.8,h*0.6,4),
-        new THREE.MeshStandardMaterial({color:rc,roughness:0.8}));
-      roof.position.y=-2+h+(h*0.6)/2; roof.rotation.y=Math.PI/4; g.add(roof);
-      const wm=new THREE.MeshStandardMaterial({color:0xFFFFE0});
-      const win1=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.8,0.1),wm);
-      win1.position.set(-w/4,-2+h/2,d/2+0.01);
-      const win2=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.8,0.1),wm);
-      win2.position.set(w/4,-2+h/2,d/2+0.01);
-      g.add(win1,win2);
-      const dm=new THREE.MeshStandardMaterial({color:0x8B4513});
-      const door=new THREE.Mesh(new THREE.BoxGeometry(1,1.5,0.1),dm);
-      door.position.set(0,-2+h/4,d/2+0.01); g.add(door);
-      return g;
-    }
-    for(let i=0;i<20;i++){
-      const w=Math.random()*4+4, h=Math.random()*20+20, d=Math.random()*4+4;
-      const b=createBuilding(w,h,d,0x555555);
-      b.position.set(-50+(i%10)*10,-2+h/2,-30-Math.floor(i/10)*20);
-      backgroundGroup.add(b);
-    }
-    for(let i=0;i<10;i++){
-      const w=Math.random()*4+6, h=Math.random()*4+6, d=Math.random()*4+6;
-      const hse=createHouse(w,h,d,0xa0522d,0x8b0000);
-      hse.position.set(-40+i*10,0,-10);
-      backgroundGroup.add(hse);
-    }
-    function createStreetlight(){
-      const g=new THREE.Group();
-      const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,4,8),
-        new THREE.MeshBasicMaterial({color:0x333333}));
-      pole.position.y=2; g.add(pole);
-      const lamp=new THREE.Mesh(new THREE.SphereGeometry(0.2,8,8),
-        new THREE.MeshBasicMaterial({color:0xffcc00}));
-      lamp.position.y=4.2; g.add(lamp);
-      const pl=new THREE.PointLight(0xffcc00,1,10);
-      pl.position.set(0,4.2,0); g.add(pl);
-      return g;
-    }
-    const characterStreetlight=createStreetlight();
-    characterStreetlight.position.set(1,-2,0); scene.add(characterStreetlight);
-
-    let rainGroup=new THREE.Group(); scene.add(rainGroup);
-    function initRain(){
-      const cnt=2000;
-      const geom=new THREE.BufferGeometry();
-      const pos=new Float32Array(cnt*3);
-      for(let i=0;i<cnt;i++){
-        pos[i*3]=Math.random()*200-100;
-        pos[i*3+1]=Math.random()*100;
-        pos[i*3+2]=Math.random()*200-100;
-      }
-      geom.setAttribute("position",new THREE.BufferAttribute(pos,3));
-      const mat=new THREE.PointsMaterial({size:0.1,transparent:true,opacity:0.6});
-      const pts=new THREE.Points(geom,mat);
-      rainGroup.add(pts);
-    }
-    initRain(); rainGroup.visible=false;
-
-    let houseCloudGroup=new THREE.Group();
-    function createHouseCloud(){
-      const g=new THREE.Group();
-      const cm=new THREE.MeshLambertMaterial({transparent:true,opacity:0.9});
-      const s1=new THREE.Mesh(new THREE.SphereGeometry(2,32,32),cm);
-      const s2=new THREE.Mesh(new THREE.SphereGeometry(1.8,32,32),cm);
-      s2.position.set(2.2,0.7,0);
-      const s3=new THREE.Mesh(new THREE.SphereGeometry(2.1,32,32),cm);
-      s3.position.set(-2.2,0.5,0);
-      g.add(s1,s2,s3);
-      return g;
-    }
-    const singleCloud=createHouseCloud();
-    houseCloudGroup.add(singleCloud);
-    houseCloudGroup.position.set(0,10,-20);
-    scene.add(houseCloudGroup);
-
-    function updateHouseClouds(){
-      singleCloud.position.x+=0.02;
-      if(singleCloud.position.x>10) singleCloud.position.x=-10;
-    }
-
-    let lightningLight=new THREE.PointLight(0xffffff,0,500);
-    lightningLight.position.set(0,50,0);
-    scene.add(lightningLight);
-
-    const characterGroup=new THREE.Group();
-    const charBody=new THREE.Mesh(new THREE.BoxGeometry(1,1.5,0.5),
-      new THREE.MeshStandardMaterial({color:0x00cc66}));
-    const head=new THREE.Mesh(new THREE.SphereGeometry(0.5,32,32),
-      new THREE.MeshStandardMaterial({color:0xffcc66}));
-    head.position.y=1.2;
-    const eyeMat=new THREE.MeshBasicMaterial({color:0x000000});
-    const leftEye=new THREE.Mesh(new THREE.SphereGeometry(0.07,16,16),eyeMat);
-    const rightEye=new THREE.Mesh(new THREE.SphereGeometry(0.07,16,16),eyeMat);
-    leftEye.position.set(-0.2,1.3,0.45);
-    rightEye.position.set(0.2,1.3,0.45);
-    const mouth=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.05,0.05),
-      new THREE.MeshStandardMaterial({color:0xff3366}));
-    mouth.position.set(0,1.1,0.51);
-    const leftBrow=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.05,0.05),eyeMat);
-    const rightBrow=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.05,0.05),eyeMat);
-    leftBrow.position.set(-0.2,1.45,0.45);
-    rightBrow.position.set(0.2,1.45,0.45);
-    const leftArm=new THREE.Mesh(new THREE.BoxGeometry(0.2,1,0.2),charBody.material);
-    const rightArm=new THREE.Mesh(new THREE.BoxGeometry(0.2,1,0.2),charBody.material);
-    leftArm.position.set(-0.7,0.4,0);
-    rightArm.position.set(0.7,0.4,0);
-    const legMat=new THREE.MeshStandardMaterial({color:0x3366cc});
-    const leftLeg=new THREE.Mesh(new THREE.BoxGeometry(0.3,1,0.3),legMat);
-    const rightLeg=new THREE.Mesh(new THREE.BoxGeometry(0.3,1,0.3),legMat);
-    leftLeg.position.set(-0.35,-1,0);
-    rightLeg.position.set(0.35,-1,0);
-    characterGroup.add(charBody,head,leftEye,rightEye,mouth,leftBrow,rightBrow,leftArm,rightArm,leftLeg,rightLeg);
-    characterGroup.position.y=-1;
-    scene.add(characterGroup);
-    const characterLight=new THREE.PointLight(0xffee88,1,15);
-    scene.add(characterLight);
-
-    let danceInterval;
 
     function animate(){
       requestAnimationFrame(animate);
-      const now=new Date();
-      const pos=new THREE.Vector3();
-      head.getWorldPosition(pos);
-      const totalMin=now.getHours()*60+now.getMinutes();
-      const angle=(totalMin/1440)*Math.PI*2;
-      const r=3;
-      sun.position.set(pos.x+Math.cos(angle)*r,pos.y+Math.sin(angle)*r,pos.z);
-      const mAngle=angle+Math.PI;
-      moon.position.set(pos.x+Math.cos(mAngle)*r,pos.y+Math.sin(mAngle)*r,pos.z);
-      const t=now.getHours()+now.getMinutes()/60;
-      let so=0, mo=0;
-      if(t<6){ so=0; mo=1; }
-      else if(t<7){ const f=t-6; so=f; mo=1-f; }
-      else if(t<17){ so=1; mo=0; }
-      else if(t<18){ const f=t-17; so=1-f; mo=f; }
-      else{ so=0; mo=1; }
-      sun.material.opacity=so; moon.material.opacity=mo;
-      const isDay=(t>=7&&t<17);
-      scene.background=new THREE.Color(isDay?0x87CEEB:0x000033);
-      stars.forEach(s=>s.visible=!isDay);
-      fireflies.forEach(f=>f.visible=!isDay);
-      characterStreetlight.traverse(c=>{
-        if(c instanceof THREE.PointLight) c.intensity=isDay?0:1;
-      });
-      characterLight.position.copy(characterGroup.position).add(new THREE.Vector3(0,5,0));
-      characterLight.intensity=isDay?0:1;
-      characterGroup.position.y=-1; characterGroup.rotation.x=0;
-      updateWeatherEffects();
-      updateHouseClouds();
-      updateLightning();
-      characterStreetlight.position.set(characterGroup.position.x+1,-2,characterGroup.position.z);
-      const bubble=document.getElementById("speech-bubble");
-      const screenPos=pos.project(camera);
-      bubble.style.left=((screenPos.x*0.5+0.5)*window.innerWidth)+"px";
-      bubble.style.top=(((1-(screenPos.y*0.5+0.5))*window.innerHeight)-50)+"px";
       renderer.render(scene,camera);
     }
     animate();
 
-    // ** 캘린더 기능 **
-    let currentYear, currentMonth;
+    // Calendar
+    let currentYear,currentMonth;
     function initCalendar(){
       const now=new Date();
       currentYear=now.getFullYear(); currentMonth=now.getMonth();
       populateYearSelect(); renderCalendar(currentYear,currentMonth);
-      document.getElementById("prev-month").addEventListener("click",()=>{
-        currentMonth--; if(currentMonth<0){ currentMonth=11; currentYear--; }
-        renderCalendar(currentYear,currentMonth);
-      });
-      document.getElementById("next-month").addEventListener("click",()=>{
-        currentMonth++; if(currentMonth>11){ currentMonth=0; currentYear++; }
-        renderCalendar(currentYear,currentMonth);
-      });
-      document.getElementById("year-select").addEventListener("change",e=>{
-        currentYear=parseInt(e.target.value);
-        renderCalendar(currentYear,currentMonth);
-      });
-      document.getElementById("delete-day-event").addEventListener("click",()=>{
-        const d=prompt("삭제할 날짜(일) 입력:"); 
-        if(d){
-          const n=parseInt(d);
-          const ev=document.getElementById(`event-${currentYear}-${currentMonth+1}-${n}`);
-          if(ev){ ev.textContent=""; alert(`${currentYear}-${currentMonth+1}-${n} 일정이 삭제되었습니다.`); }
-          else alert("해당 날짜 셀이 없습니다.");
-        }
-      });
+      document.getElementById("prev-month")
+        .addEventListener("click",()=>{ currentMonth--; if(currentMonth<0){currentMonth=11;currentYear--;} renderCalendar(currentYear,currentMonth);});
+      document.getElementById("next-month")
+        .addEventListener("click",()=>{ currentMonth++; if(currentMonth>11){currentMonth=0;currentYear++;} renderCalendar(currentYear,currentMonth);});
+      document.getElementById("year-select")
+        .addEventListener("change",e=>{ currentYear=parseInt(e.target.value); renderCalendar(currentYear,currentMonth); });
+      document.getElementById("delete-day-event")
+        .addEventListener("click",()=>{
+          const d=prompt("삭제할 날짜(일) 입력:"); if(d){
+            const n=parseInt(d);
+            const ev=document.getElementById(`event-${currentYear}-${currentMonth+1}-${n}`);
+            if(ev){ ev.textContent=""; alert("삭제되었습니다."); }
+            else alert("해당 날짜가 없습니다.");}
+        });
       document.getElementById("save-calendar").addEventListener("click",saveCalendar);
     }
     function populateYearSelect(){
       const sel=document.getElementById("year-select");
       sel.innerHTML="";
       for(let y=2020;y<=2070;y++){
-        const opt=document.createElement("option");
-        opt.value=y; opt.textContent=y;
-        if(y===currentYear) opt.selected=true;
-        sel.appendChild(opt);
+        const o=document.createElement("option");
+        o.value=y; o.textContent=y; if(y===currentYear) o.selected=true;
+        sel.appendChild(o);
       }
     }
     function renderCalendar(y,m){
@@ -572,51 +279,31 @@
       const days=new Date(y,m+1,0).getDate();
       for(let d=1;d<=days;d++){
         const cell=document.createElement("div");
-        cell.innerHTML=`<div class="day-number">${d}</div>
-          <div class="event" id="event-${y}-${m+1}-${d}"></div>`;
+        cell.innerHTML=`<div class="day-number">${d}</div><div class="event" id="event-${y}-${m+1}-${d}"></div>`;
         cell.addEventListener("click",()=>{
-          const txt=prompt(`${y}-${m+1}-${d} 일정 입력:`);
-          if(txt){
+          const t=prompt(`${y}-${m+1}-${d} 일정 입력:`); if(t){
             const ev=document.getElementById(`event-${y}-${m+1}-${d}`);
-            ev.textContent += ev.textContent?"; "+txt:txt;
+            ev.textContent+=ev.textContent?"; "+t:t;
           }
         });
         grid.appendChild(cell);
       }
     }
 
-    // ** 튜토리얼 표시 **
     function showTutorial(){
       const ov=document.getElementById("tutorial-overlay");
-      ov.style.display="flex";
-      setTimeout(()=>{ ov.style.opacity="1"; },10);
-      setTimeout(()=>{
-        ov.style.opacity="0";
-        setTimeout(()=>{ ov.style.display="none"; },1000);
-      },4000);
+      ov.style.display="flex"; setTimeout(()=>ov.style.opacity="1",10);
+      setTimeout(()=>{ ov.style.opacity="0"; setTimeout(()=>ov.style.display="none",1000); },4000);
     }
 
-    // ** 버전 선택 **
     function changeVersion(v){
       if(v==="1.3") window.location.href=window.location.href;
-      else if(v==="latest") alert("최신 버전으로 이동하려면 해당 URL을 입력하세요.");
+      else if(v==="latest") alert("최신 버전으로 이동하려면 URL을 입력하세요.");
     }
 
-    // ** 이벤트 바인딩 **
-    window.addEventListener("DOMContentLoaded",()=>{
-      document.getElementById("chat-input").addEventListener("keydown",e=>{
-        if(e.key==="Enter") sendChat();
-      });
-    });
-    window.addEventListener("resize",()=>{
-      camera.aspect=window.innerWidth/window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth,window.innerHeight);
-    });
     window.addEventListener("load",()=>{
       initCalendar();
       showTutorial();
-      initMap();
     });
   </script>
 </head>
@@ -629,7 +316,10 @@
     </div>
     <div id="hud3">
       <h4>HUD3: 지도</h4>
-      <div id="map"></div>
+      <iframe
+        src="https://www.google.com/maps?q=Seoul&output=embed"
+        allowfullscreen>
+      </iframe>
     </div>
   </div>
 
